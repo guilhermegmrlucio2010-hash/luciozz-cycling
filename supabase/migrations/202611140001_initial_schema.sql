@@ -9,6 +9,13 @@ create table public.profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+create function public.handle_new_user() returns trigger language plpgsql security definer set search_path=public as $$
+begin
+  insert into public.profiles(id,display_name,role) values(new.id,coalesce(new.raw_user_meta_data->>'display_name',split_part(new.email,'@',1)),coalesce((new.raw_user_meta_data->>'role')::public.user_role,'athlete'));
+  if coalesce(new.raw_user_meta_data->>'role','athlete')='athlete' then insert into public.athlete_profiles(user_id) values(new.id); end if;
+  return new;
+end $$;
+create trigger on_auth_user_created after insert on auth.users for each row execute procedure public.handle_new_user();
 create table public.athlete_profiles (
   user_id uuid primary key references public.profiles(id) on delete cascade,
   ftp integer check (ftp between 1 and 1000),

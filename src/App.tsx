@@ -1,7 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Activity, BarChart3, Bell, Bike, CalendarDays, ChevronLeft, ChevronRight, FileUp, Gauge, HeartPulse, Menu, Plus, Settings, UserRound, X } from 'lucide-react'
 import './App.css'
 import './phase2.css'
+import './auth.css'
+import { backendConfigured, supabase } from './lib/supabase'
+import type { Session } from '@supabase/supabase-js'
 
 const nav = [['Visão geral', Gauge], ['Calendário', CalendarDays], ['Atividades', Activity], ['Análise', BarChart3], ['Monitorização', HeartPulse], ['Treinos', Bike], ['Perfil', UserRound], ['Definições', Settings]] as const
 type Page = typeof nav[number][0]
@@ -12,11 +15,20 @@ function Empty({ icon: Icon, title, text, action }: { icon: typeof CalendarDays;
 }
 
 function App() {
+  const [session, setSession] = useState<Session | null>(null)
+  const [authReady, setAuthReady] = useState(!backendConfigured)
   const [active, setActive] = useState<Page>('Visão geral')
   const [menu, setMenu] = useState(false)
   const [modal, setModal] = useState(false)
   const [workouts, setWorkouts] = useState<Workout[]>(() => JSON.parse(localStorage.getItem('lc-workouts') || '[]'))
   const [month, setMonth] = useState(new Date(2026, 10, 1))
+
+  useEffect(() => {
+    if (!supabase) return
+    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true) })
+    const { data } = supabase.auth.onAuthStateChange((_event, next) => setSession(next))
+    return () => data.subscription.unsubscribe()
+  }, [])
 
   function go(page: Page) { setActive(page); setMenu(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   function addWorkout(event: React.FormEvent<HTMLFormElement>) {
@@ -41,7 +53,15 @@ function App() {
     return <PageFrame kicker="APLICAÇÃO" title="Definições"><div className="settings-list"><label><div><b>Modo escuro</b><small>Identidade visual principal</small></div><input type="checkbox" defaultChecked/></label><label><div><b>Notificações internas</b><small>Treinos, alterações e comentários</small></div><input type="checkbox" defaultChecked/></label><label><div><b>Supabase</b><small>Será ligado na Fase 3</small></div><span className="status">Por configurar</span></label></div></PageFrame>
   }
 
-  return <div className="app">{menu&&<button className="scrim" onClick={()=>setMenu(false)}/>}<aside className={menu?'sidebar open':'sidebar'}><div className="brand"><span>LC</span><div><b>LUCIOZZ</b><small>CYCLING</small></div><button onClick={()=>setMenu(false)}><X/></button></div><p className="nav-label">TREINO</p><nav>{nav.map(([label,Icon])=><button key={label} className={active===label?'active':''} onClick={()=>go(label)}><Icon/>{label}</button>)}</nav><div className="sync"><i/><div><b>Modo local</b><small>Dados guardados neste navegador</small></div></div></aside><main><header><button className="hamb" onClick={()=>setMenu(true)}><Menu/></button><div><span>14 NOV 2026</span><b>{active}</b></div><button className="bell"><Bell/><i/></button></header><div className="content">{pageContent()}</div></main>{modal&&<div className="modal-back"><form className="modal" onSubmit={addWorkout}><div className="modal-title"><div><span>NOVO PLANO</span><h2>Criar treino</h2></div><button type="button" onClick={()=>setModal(false)}><X/></button></div><label>Nome<input name="name" required placeholder="Ex.: Sweet Spot"/></label><div className="form-row"><label>Data<input name="date" required type="date"/></label><label>Duração (min)<input name="duration" required type="number" min="1"/></label></div><label>Intensidade<select name="intensity"><option>Recuperação</option><option>Baixa</option><option>Moderada</option><option>Alta</option><option>Máxima</option></select></label><button className="primary" type="submit">Guardar treino</button></form></div>}</div>
+  if (!authReady) return <div className="auth-loading">A ligar ao Luciozz Cycling…</div>
+  if (backendConfigured && !session) return <AuthScreen />
+  return <div className="app">{menu&&<button className="scrim" onClick={()=>setMenu(false)}/>}<aside className={menu?'sidebar open':'sidebar'}><div className="brand"><span>LC</span><div><b>LUCIOZZ</b><small>CYCLING</small></div><button onClick={()=>setMenu(false)}><X/></button></div><p className="nav-label">TREINO</p><nav>{nav.map(([label,Icon])=><button key={label} className={active===label?'active':''} onClick={()=>go(label)}><Icon/>{label}</button>)}</nav><div className="sync online"><i/><div><b>{backendConfigured?'Supabase ligado':'Modo local'}</b><small>{backendConfigured?session?.user.email:'Dados neste navegador'}</small></div></div></aside><main><header><button className="hamb" onClick={()=>setMenu(true)}><Menu/></button><div><span>14 NOV 2026</span><b>{active}</b></div><div className="header-actions">{backendConfigured&&<button className="logout" onClick={()=>supabase?.auth.signOut()}>Sair</button>}<button className="bell"><Bell/><i/></button></div></header><div className="content">{pageContent()}</div></main>{modal&&<div className="modal-back"><form className="modal" onSubmit={addWorkout}><div className="modal-title"><div><span>NOVO PLANO</span><h2>Criar treino</h2></div><button type="button" onClick={()=>setModal(false)}><X/></button></div><label>Nome<input name="name" required placeholder="Ex.: Sweet Spot"/></label><div className="form-row"><label>Data<input name="date" required type="date"/></label><label>Duração (min)<input name="duration" required type="number" min="1"/></label></div><label>Intensidade<select name="intensity"><option>Recuperação</option><option>Baixa</option><option>Moderada</option><option>Alta</option><option>Máxima</option></select></label><button className="primary" type="submit">Guardar treino</button></form></div>}</div>
+}
+
+function AuthScreen(){
+  const [register,setRegister]=useState(false); const [message,setMessage]=useState(''); const [busy,setBusy]=useState(false)
+  async function submit(event:React.FormEvent<HTMLFormElement>){event.preventDefault();setBusy(true);setMessage('');const data=new FormData(event.currentTarget);const email=String(data.get('email'));const password=String(data.get('password'));const result=register?await supabase!.auth.signUp({email,password,options:{data:{display_name:String(data.get('name')),role:String(data.get('role'))}}}):await supabase!.auth.signInWithPassword({email,password});setBusy(false);setMessage(result.error?.message|| (register?'Verifica o teu email para confirmar a conta.':'Sessão iniciada.'))}
+  return <main className="auth-page"><section className="auth-brand"><span>LC</span><p>LUCIOZZ CYCLING</p><h1>O teu treino.<br/><em>O teu progresso.</em></h1><small>Uma plataforma privada para atleta e treinador.</small></section><form className="auth-card" onSubmit={submit}><span>ACESSO PRIVADO</span><h2>{register?'Criar conta autorizada':'Bem-vindo'}</h2><p>{register?'Cria primeiro a conta do atleta e depois a do treinador.':'Inicia sessão para aceder ao teu plano.'}</p>{register&&<><label>Nome<input name="name" required/></label><label>Perfil<select name="role"><option value="athlete">Atleta</option><option value="coach">Treinador</option></select></label></>}<label>Email<input name="email" type="email" required/></label><label>Palavra-passe<input name="password" type="password" minLength={8} required/></label>{message&&<div className="auth-message">{message}</div>}<button className="primary" disabled={busy}>{busy?'A processar…':register?'Criar conta':'Entrar'}</button><button type="button" className="auth-switch" onClick={()=>{setRegister(!register);setMessage('')}}>{register?'Já tenho conta':'Criar uma conta autorizada'}</button></form></main>
 }
 
 function PageFrame({kicker,title,action,children}:{kicker:string;title:string;action?:React.ReactNode;children:React.ReactNode}){return <section className="page"><div className="page-head"><div><span>{kicker}</span><h1>{title}</h1></div>{action}</div>{children}</section>}
