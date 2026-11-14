@@ -31,6 +31,8 @@ function App() {
   const [profile, setProfile] = useState<AthleteProfile>({display_name:'',sport:'cycling',ftp:null,max_heart_rate:null,resting_heart_rate:null,units:'metric'})
   const [activities,setActivities]=useState<CompletedActivity[]>([])
   const [importing,setImporting]=useState(false)
+  const [role,setRole]=useState<'athlete'|'coach'>('athlete')
+  const [targetAthleteId,setTargetAthleteId]=useState<string|null>(null)
   const [workouts, setWorkouts] = useState<Workout[]>(() => JSON.parse(localStorage.getItem('lc-workouts') || '[]'))
   const [month, setMonth] = useState(new Date(2026, 10, 1))
 
@@ -41,14 +43,15 @@ function App() {
     return () => data.subscription.unsubscribe()
   }, [])
   useEffect(() => { if (!session || !supabase) return; supabase.from('daily_monitoring').select('*').order('recorded_on',{ascending:false}).then(({data})=>setMonitoring((data as Monitoring[])||[])) }, [session])
-  useEffect(() => { if (!session || !supabase) return; supabase.from('planned_workouts').select('id,title,scheduled_at,planned_duration_seconds,intensity').order('scheduled_at').then(({data,error})=>{if(error)return;setWorkouts((data||[]).map(row=>({id:row.id,name:row.title,date:row.scheduled_at.slice(0,10),duration:Math.round(row.planned_duration_seconds/60),intensity:row.intensity||'Moderada'})))}) }, [session])
+  useEffect(()=>{const client=supabase;if(!session||!client)return;client.from('profiles').select('role').eq('id',session.user.id).single().then(async({data})=>{const next=(data?.role||'athlete') as 'athlete'|'coach';setRole(next);if(next==='athlete')setTargetAthleteId(session.user.id);else{const {data:link}=await client.from('coach_athlete_links').select('athlete_id').eq('coach_id',session.user.id).eq('active',true).maybeSingle();setTargetAthleteId(link?.athlete_id||null)}})},[session])
+  useEffect(() => { if (!targetAthleteId || !supabase) return; supabase.from('planned_workouts').select('id,title,scheduled_at,planned_duration_seconds,intensity').eq('athlete_id',targetAthleteId).order('scheduled_at').then(({data,error})=>{if(error)return;setWorkouts((data||[]).map(row=>({id:row.id,name:row.title,date:row.scheduled_at.slice(0,10),duration:Math.round(row.planned_duration_seconds/60),intensity:row.intensity||'Moderada'})))}) }, [targetAthleteId])
   useEffect(()=>{if(!session||!supabase)return;Promise.all([supabase.from('profiles').select('display_name').eq('id',session.user.id).single(),supabase.from('athlete_profiles').select('sport,ftp,max_heart_rate,resting_heart_rate,units').eq('user_id',session.user.id).single()]).then(([base,sport])=>{if(base.data&&sport.data)setProfile({...sport.data,display_name:base.data.display_name})})},[session])
   useEffect(()=>{if(!session||!supabase)return;supabase.from('completed_activities').select('id,started_at,sport,duration_seconds,distance_meters,avg_power,normalized_power,avg_heart_rate,tss').order('started_at',{ascending:false}).then(({data})=>setActivities((data as CompletedActivity[])||[]))},[session])
 
   function go(page: Page) { setActive(page); setMenu(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   async function addWorkout(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget); const item={id:String(Date.now()),name:String(form.get('name')),date:String(form.get('date')),duration:Number(form.get('duration')),intensity:String(form.get('intensity'))}
-    if(supabase&&session){const {data,error}=await supabase.from('planned_workouts').insert({athlete_id:session.user.id,created_by:session.user.id,title:item.name,scheduled_at:`${item.date}T09:00:00`,planned_duration_seconds:item.duration*60,intensity:item.intensity}).select('id,title,scheduled_at,planned_duration_seconds,intensity').single();if(error){alert(`Não foi possível guardar: ${error.message}`);return}item.id=data.id}
+    if(supabase&&session){if(!targetAthleteId){alert('Não existe atleta associado.');return}const {data,error}=await supabase.from('planned_workouts').insert({athlete_id:targetAthleteId,created_by:session.user.id,title:item.name,scheduled_at:`${item.date}T09:00:00`,planned_duration_seconds:item.duration*60,intensity:item.intensity}).select('id,title,scheduled_at,planned_duration_seconds,intensity').single();if(error){alert(`Não foi possível guardar: ${error.message}`);return}item.id=data.id}
     const next=[...workouts,item].sort((a,b)=>a.date.localeCompare(b.date));setWorkouts(next);if(!supabase)localStorage.setItem('lc-workouts',JSON.stringify(next));setModal(false)
   }
   async function deleteWorkout(id:string){if(supabase){const {error}=await supabase.from('planned_workouts').delete().eq('id',id);if(error){alert(error.message);return}}const next=workouts.filter(x=>x.id!==id);setWorkouts(next);if(!supabase)localStorage.setItem('lc-workouts',JSON.stringify(next))}
@@ -58,6 +61,7 @@ function App() {
   const totalMinutes = useMemo(() => workouts.reduce((sum, w) => sum + w.duration, 0), [workouts])
 
   function pageContent() {
+    if(role==='coach'&&active==='Monitorização') return <PageFrame kicker="PRIVACIDADE" title="Monitorização"><Empty icon={HeartPulse} title="Dados privados do atleta" text="O treinador só verá os indicadores que o atleta autorizar."/></PageFrame>
     if (active === 'Visão geral') return <>
       <section className="hero"><div><span className="eyebrow">CENTRO DE DESEMPENHO</span><h1>Pedala com<br/><em>propósito.</em></h1><p>Planeamento, recuperação e análise de ciclismo numa única aplicação privada.</p><button className="primary" onClick={() => go('Calendário')}>Abrir calendário <ChevronRight/></button></div><div className="rings"><div><span>{workouts.length || '—'}</span><small>TREINOS PLANEADOS</small></div></div></section>
       <section className="metrics"><article><span>VOLUME PLANEADO</span><strong>{totalMinutes ? `${Math.floor(totalMinutes/60)}h ${totalMinutes%60}m` : '—'}</strong><small>Todos os treinos</small></article><article><span>PRÓXIMO TREINO</span><strong>{workouts[0]?.name || '—'}</strong><small>{workouts[0]?.date || 'Ainda não planeado'}</small></article><article><span>ESTADO</span><strong className="ready">ATIVO</strong><small>Interface funcional</small></article></section>
