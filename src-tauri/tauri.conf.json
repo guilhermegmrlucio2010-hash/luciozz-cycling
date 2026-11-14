@@ -5,5 +5,5 @@
   "identifier": "pt.luciozz.cycling",
   "build": {"beforeDevCommand":"npm run dev","devUrl":"http://localhost:5173","beforeBuildCommand":"npm run build","frontendDist":"../dist"},
   "app": {"windows":[{"title":"Luciozz Cycling","width":1280,"height":820,"minWidth":360,"minHeight":640}],"security":{"csp":null}},
-  "bundle": {"active":true,"targets":["msi","nsis"],"icon":[]}
+  "bundle": {"active":true,"targets":["msi","nsis"],"icon":["icons/icon.ico"]}
 }
