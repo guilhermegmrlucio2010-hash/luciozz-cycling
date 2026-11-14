@@ -1,0 +1,10 @@
+{
+  "name": "Luciozz Cycling",
+  "short_name": "Luciozz",
+  "description": "Planeamento e análise privada de treino de ciclismo.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07090c",
+  "theme_color": "#168cff",
+  "icons": [{"src":"/favicon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}
